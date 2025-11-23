@@ -1,28 +1,34 @@
-import { DataRow, CalculatedMetrics } from '../types';
+
+import { CalculatedMetrics } from '../types';
 
 export const calculateMetrics = (
-  data: DataRow[],
-  truthCol: string,
-  predCol: string
+  xValues: number[],
+  yValues: number[],
+  seriesName: string,
+  xName: string
 ): CalculatedMetrics | null => {
-  if (!data || data.length === 0 || !truthCol || !predCol) return null;
+  if (!xValues || !yValues || xValues.length === 0 || yValues.length === 0) return null;
 
   let sumAbsDiff = 0;
   let sumSqDiff = 0;
   let sumTruth = 0;
   let count = 0;
   
-  const validPairs: { t: number; p: number }[] = [];
+  // We assume index alignment for comparison (row 1 vs row 1)
+  // Use the shorter length to avoid out of bounds
+  const length = Math.min(xValues.length, yValues.length);
 
-  // First pass: extract valid numbers and basic sums
-  for (const row of data) {
-    const t = Number(row[truthCol]);
-    const p = Number(row[predCol]);
+  for (let i = 0; i < length; i++) {
+    const t = xValues[i]; // Truth (X)
+    const p = yValues[i]; // Prediction (Y)
 
     if (!isNaN(t) && !isNaN(p)) {
-      validPairs.push({ t, p });
       sumTruth += t;
       count++;
+      
+      const diff = t - p;
+      sumAbsDiff += Math.abs(diff);
+      sumSqDiff += diff * diff;
     }
   }
 
@@ -31,22 +37,25 @@ export const calculateMetrics = (
   const meanTruth = sumTruth / count;
   let sumSqTotal = 0; // Total Sum of Squares (for R2)
 
-  for (const { t, p } of validPairs) {
-    const diff = t - p;
-    sumAbsDiff += Math.abs(diff);
-    sumSqDiff += diff * diff;
-    sumSqTotal += (t - meanTruth) * (t - meanTruth);
+  // Second pass for R2
+  for (let i = 0; i < length; i++) {
+    const t = xValues[i];
+    const p = yValues[i];
+    
+    if (!isNaN(t) && !isNaN(p)) {
+       sumSqTotal += (t - meanTruth) * (t - meanTruth);
+    }
   }
 
   const mae = sumAbsDiff / count;
   const rmse = Math.sqrt(sumSqDiff / count);
   
   // R2 = 1 - (SS_res / SS_tot)
-  // If SS_tot is 0 (all truth values are same), R2 is technically undefined or 0 depending on interpretation.
   const r2 = sumSqTotal === 0 ? 0 : 1 - (sumSqDiff / sumSqTotal);
 
   return {
-    seriesName: predCol,
+    seriesName,
+    xName,
     mae,
     rmse,
     r2,

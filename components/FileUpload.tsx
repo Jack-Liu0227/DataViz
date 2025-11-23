@@ -1,18 +1,21 @@
-import React, { useCallback, useState } from 'react';
+
+import React, { useCallback, useState, useRef } from 'react';
 import * as XLSX from 'xlsx';
-import { Upload, FileType, AlertCircle, Loader2 } from 'lucide-react';
+import { Upload, FileType, AlertCircle, Loader2, Plus } from 'lucide-react';
 import { DataRow } from '../types';
 
 interface FileUploadProps {
   onDataLoaded: (data: DataRow[], columns: string[], fileName: string) => void;
+  compact?: boolean;
 }
 
-export const FileUpload: React.FC<FileUploadProps> = ({ onDataLoaded }) => {
+export const FileUpload: React.FC<FileUploadProps> = ({ onDataLoaded, compact = false }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const dragCounter = useRef(0);
 
-  const processFile = async (file: File) => {
+  const processFile = useCallback(async (file: File) => {
     setLoading(true);
     setError(null);
     
@@ -28,49 +31,42 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onDataLoaded }) => {
           if (file.name.toLowerCase().endsWith('.csv')) {
              let text: string;
              try {
-                // First try UTF-8 with fatal=true to catch invalid sequences
                 const decoder = new TextDecoder('utf-8', { fatal: true });
                 text = decoder.decode(data);
              } catch (utf8Error) {
-                // If UTF-8 fails, try GBK (common for Chinese data)
                 try {
                     const decoder = new TextDecoder('gbk', { fatal: true });
                     text = decoder.decode(data);
                 } catch (gbkError) {
-                    // Fallback to ISO-8859-1 (Latin1) which usually doesn't throw but might show wrong chars
                     const decoder = new TextDecoder('iso-8859-1');
                     text = decoder.decode(data);
                 }
              }
              workbook = XLSX.read(text, { type: 'string' });
           } else {
-             // Excel files are binary formats (xlsx, xls)
              workbook = XLSX.read(data, { type: 'array' });
           }
 
           const firstSheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[firstSheetName];
-          
-          // Convert to JSON
           const jsonData = XLSX.utils.sheet_to_json<DataRow>(worksheet, { defval: null });
           
           if (jsonData.length === 0) {
-            throw new Error("File appears to be empty.");
+            throw new Error(`File ${file.name} appears to be empty.`);
           }
 
           const columns = Object.keys(jsonData[0]);
-          
           onDataLoaded(jsonData, columns, file.name);
         } catch (err) {
           console.error(err);
-          setError("Failed to parse file. Please check the format or encoding.");
+          setError(`Failed to parse ${file.name}.`);
         } finally {
           setLoading(false);
         }
       };
 
       reader.onerror = () => {
-        setError("Error reading file.");
+        setError(`Error reading ${file.name}.`);
         setLoading(false);
       };
 
@@ -80,31 +76,109 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onDataLoaded }) => {
       setError(err instanceof Error ? err.message : "Unknown error");
       setLoading(false);
     }
-  };
+  }, [onDataLoaded]);
 
-  const onDrop = useCallback((e: React.DragEvent) => {
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      processFile(e.dataTransfer.files[0]);
+    e.stopPropagation();
+    dragCounter.current += 1;
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsDragging(true);
     }
   }, []);
 
-  const onFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      processFile(e.target.files[0]);
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current -= 1;
+    if (dragCounter.current === 0) {
+      setIsDragging(false);
     }
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    dragCounter.current = 0;
+    
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      // Process all dropped files
+      Array.from(e.dataTransfer.files).forEach(file => {
+         processFile(file);
+      });
+    }
+  }, [processFile]);
+
+  const onFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      Array.from(e.target.files).forEach(file => {
+        processFile(file);
+      });
+    }
+    // Reset input so same file can be selected again if needed
+    e.target.value = '';
   };
+
+  if (compact) {
+      return (
+        <div
+            onDragEnter={handleDragEnter}
+            onDragLeave={handleDragLeave}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+            className={`
+                relative rounded-lg transition-all duration-200 border-2 border-dashed
+                ${isDragging ? 'border-blue-500 bg-blue-50' : 'border-transparent'}
+            `}
+        >
+            {isDragging ? (
+                <div className="flex flex-col items-center justify-center py-8 animate-in fade-in zoom-in duration-200">
+                    <Upload className="w-8 h-8 text-blue-600 mb-2" />
+                    <span className="text-sm font-medium text-blue-700">Drop files to add</span>
+                </div>
+            ) : (
+                <div className="p-1">
+                    <button 
+                        onClick={() => document.getElementById('fileInputCompact')?.click()}
+                        className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg shadow-sm transition-colors w-full justify-center text-sm font-medium"
+                    >
+                        {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                        Add Another File
+                    </button>
+                    <div className="mt-2 text-center">
+                        <p className="text-[10px] text-slate-400 uppercase tracking-wider">or drag & drop</p>
+                    </div>
+                    <input 
+                        type="file" 
+                        id="fileInputCompact" 
+                        className="hidden" 
+                        accept=".csv,.xlsx,.xls" 
+                        multiple
+                        onChange={onFileSelect} 
+                    />
+                    {error && <div className="text-red-500 text-xs mt-2 text-center">{error}</div>}
+                </div>
+            )}
+        </div>
+      )
+  }
 
   return (
     <div className="w-full max-w-2xl mx-auto p-6">
       <div 
-        className={`border-2 border-dashed rounded-xl p-10 text-center transition-colors cursor-pointer
+        className={`border-2 border-dashed rounded-xl p-10 text-center transition-colors cursor-pointer relative
           ${isDragging ? 'border-blue-500 bg-blue-50' : 'border-slate-300 hover:border-slate-400 bg-white'}
         `}
-        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-        onDragLeave={() => setIsDragging(false)}
-        onDrop={onDrop}
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
         onClick={() => document.getElementById('fileInput')?.click()}
       >
         <input 
@@ -112,6 +186,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onDataLoaded }) => {
           id="fileInput" 
           className="hidden" 
           accept=".csv,.xlsx,.xls" 
+          multiple
           onChange={onFileSelect} 
         />
         
@@ -129,10 +204,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onDataLoaded }) => {
               Upload CSV or Excel
             </h3>
             <p className="text-slate-500 mb-6">
-              Drag & drop your file here or click to browse
-            </p>
-            <p className="text-xs text-slate-400">
-              Auto-detects encoding (UTF-8, GBK, etc.)
+              Drag & drop to add files
             </p>
           </>
         )}
