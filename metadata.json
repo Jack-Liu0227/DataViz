@@ -1,0 +1,5 @@
+{
+  "name": "DataViz Pro & Metrics",
+  "description": "A powerful CSV/Excel visualization tool supporting dual-axis plotting, custom encoding parsing, and automatic calculation of MAE, RMSE, and R² metrics.",
+  "requestFramePermissions": []
+}
